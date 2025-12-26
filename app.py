@@ -5,102 +5,111 @@ import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÃO SUPABASE ---
-# Pegue esses dados no painel do Supabase (Project Settings > API)
 SUPABASE_URL = "https://vfbzvzajgbllbbnfrqbh.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZmYnp2emFqZ2JsbGJibmZycWJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY2OTk2MjIsImV4cCI6MjA4MjI3NTYyMn0.b3Nk15L9Ez0i50kMpaOkBQEfOSY8GIhNYNmk9rycA9c"
+
+# Inicialização do Cliente
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="Gran Turin - Gestão", layout="centered")
+st.set_page_config(page_title="Gran Turin - Gestão", layout="centered", page_icon="🍊")
 
-# --- FUNÇÕES DE BANCO DE DATA ---
+# --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_dados():
-    response = supabase.table("estoque").select("*").execute()
-    return pd.DataFrame(response.data)
+    try:
+        response = supabase.table("estoque").select("*").execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        return pd.DataFrame()
 
-def atualizar_banco(id_item, atual, minimo):
-    supabase.table("estoque").update({"quantidade_atual": atual, "estoque_minimo": minimo}).eq("id", id_item).execute()
-
-def excluir_item(id_item):
-    supabase.table("estoque").delete().eq("id", id_item).execute()
-
-def adicionar_item(categoria, produto, minimo):
-    supabase.table("estoque").insert({
-        "categoria": categoria,
-        "produto": produto,
-        "quantidade_atual": 0,
+def salvar_no_banco(id_item, atual, minimo):
+    supabase.table("estoque").update({
+        "quantidade_atual": atual, 
         "estoque_minimo": minimo
-    }).execute()
+    }).eq("id", id_item).execute()
+    st.success("Dados atualizados!")
+    st.rerun()
 
-# --- INTERFACE ---
-st.title("🍊 Gran Turin - Gestão Total")
-st.caption(f"Controle de Estoque Profissional - {datetime.now().strftime('%d/%m/%Y')}")
-
-tab1, tab2, tab3 = st.tabs(["📦 Estoque", "🛒 Compras", "⚙️ Gerenciar"])
+# --- INTERFACE PRINCIPAL ---
+st.title("🍊 Gran Turin - Gestão")
+st.write(f"Sincronizado com Supabase | {datetime.now().strftime('%d/%m/%Y')}")
 
 df = carregar_dados()
 
-# --- ABA 1: ESTOQUE ---
+# Verifica se há dados para evitar o KeyError
+if df.empty:
+    st.info("O banco de dados está vazio. Cadastre o primeiro item na aba 'GERENCIAR'.")
+    df = pd.DataFrame(columns=['id', 'categoria', 'produto', 'quantidade_atual', 'estoque_minimo'])
+
+tab1, tab2, tab3 = st.tabs(["📦 CONFERIR ESTOQUE", "🛒 LISTA DE COMPRAS", "⚙️ GERENCIAR"])
+
+# --- ABA 1: ESTOQUE (COM CONFIRMAÇÃO) ---
 with tab1:
-    st.subheader("Conferência Diária")
-    categorias = df['categoria'].unique()
-    for cat in categorias:
-        with st.expander(cat):
-            itens = df[df['categoria'] == cat]
-            for _, row in itens.iterrows():
-                col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
-                col1.write(f"**{row['produto']}**")
-                novo_at = col2.number_input("Tem", value=int(row['quantidade_atual']), key=f"at_{row['id']}")
-                novo_min = col3.number_input("Mín", value=int(row['estoque_minimo']), key=f"min_{row['id']}")
-                
-                if col4.button("💾", key=f"btn_{row['id']}"):
-                    # Lógica de confirmação nativa do Streamlit
-                    if novo_min != row['estoque_minimo']:
-                        st.warning(f"Alterar mínimo de {row['produto']}?")
-                        if st.button("Confirmar Alteração", key=f"conf_{row['id']}"):
-                            atualizar_banco(row['id'], novo_at, novo_min)
-                            st.success("Salvo!")
-                            st.rerun()
-                    else:
-                        atualizar_banco(row['id'], novo_at, novo_min)
-                        st.success("Salvo!")
-                        st.rerun()
+    if not df.empty:
+        categorias = df['categoria'].unique()
+        for cat in categorias:
+            with st.expander(f"📁 Categoria: {cat}", expanded=True):
+                itens = df[df['categoria'] == cat]
+                for _, row in itens.iterrows():
+                    with st.container():
+                        col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+                        
+                        col1.write(f"**{row['produto']}**")
+                        novo_at = col2.number_input("Tem", value=int(row['quantidade_atual']), key=f"at_{row['id']}")
+                        novo_min = col3.number_input("Mín", value=int(row['estoque_minimo']), key=f"min_{row['id']}")
+                        
+                        # Lógica de Confirmação
+                        if col4.button("💾", key=f"btn_{row['id']}"):
+                            # Se o estoque mínimo mudou, pede confirmação
+                            if novo_min != row['estoque_minimo']:
+                                st.warning(f"Confirmar novo mínimo de {novo_min} para {row['produto']}?")
+                                if st.button("SIM, ALTERAR", key=f"confirm_{row['id']}"):
+                                    salvar_no_banco(row['id'], novo_at, novo_min)
+                            else:
+                                # Se mudou apenas a quantidade atual, salva direto
+                                salvar_no_banco(row['id'], novo_at, novo_min)
+                    st.divider()
 
-# --- ABA 2: COMPRAS ---
+# --- ABA 2: COMPRAS + WHATSAPP ---
 with tab2:
-    st.subheader("Lista de Reposição")
     faltantes = df[df['quantidade_atual'] < df['estoque_minimo']]
-    
     if faltantes.empty:
-        st.success("✅ Tudo em dia!")
+        st.success("✅ Tudo em ordem no Gran Turin!")
     else:
-        msg_whatsapp = "*Lista Gran Turin*\n\n"
-        for _, row in faltantes.iterrows():
-            falta = row['estoque_minimo'] - row['quantidade_atual']
-            item_str = f"• {row['produto']} (Faltam {falta} un.)"
-            st.error(item_str)
-            msg_whatsapp += item_str + "\n"
+        st.subheader("Itens abaixo do mínimo")
+        texto_whats = f"*Lista de Compras Gran Turin - {datetime.now().strftime('%d/%m')}*\n\n"
         
-        link_wa = f"https://wa.me/?text={urllib.parse.quote(msg_whatsapp)}"
-        st.link_button("Enviar para WhatsApp", link_wa, type="primary")
+        for _, row in faltantes.iterrows():
+            qtd_necessaria = row['estoque_minimo'] - row['quantidade_atual']
+            item_msg = f"• {row['produto']} (Faltam {qtd_necessaria} un.)"
+            st.error(item_msg)
+            texto_whats += item_msg + "\n"
+        
+        st.divider()
+        link_wa = f"https://wa.me/?text={urllib.parse.quote(texto_whats)}"
+        st.link_button("🚀 ENVIAR PARA WHATSAPP", link_wa, use_container_width=True)
 
-# --- ABA 3: GERENCIAR ---
+# --- ABA 3: GERENCIAR (ADICIONAR/EXCLUIR) ---
 with tab3:
     st.subheader("Novo Produto")
-    with st.form("add_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns([2, 2, 1])
-        n_cat = c1.text_input("Categoria")
-        n_prod = c2.text_input("Produto")
-        n_min = c3.number_input("Mínimo", value=5)
-        if st.form_submit_button("Cadastrar"):
-            adicionar_item(n_cat, n_prod, n_min)
-            st.success("Cadastrado!")
-            st.rerun()
+    with st.form("form_add", clear_on_submit=True):
+        c1 = st.text_input("Nome da Categoria (ex: Grãos)")
+        p1 = st.text_input("Nome do Produto (ex: Arroz)")
+        m1 = st.number_input("Estoque Mínimo Inicial", min_value=1, value=5)
+        if st.form_submit_button("CADASTRAR PRODUTO"):
+            if c1 and p1:
+                supabase.table("estoque").insert({
+                    "categoria": c1, "produto": p1, 
+                    "quantidade_atual": 0, "estoque_minimo": m1
+                }).execute()
+                st.success("Cadastrado com sucesso!")
+                st.rerun()
     
     st.divider()
     st.subheader("Remover Itens")
-    for _, row in df.iterrows():
-        c1, c2 = st.columns([4, 1])
-        c1.write(f"{row['categoria']} > {row['produto']}")
-        if c2.button("🗑️", key=f"del_{row['id']}"):
-            excluir_item(row['id'])
-            st.rerun()
+    if not df.empty:
+        for _, row in df.iterrows():
+            col_a, col_b = st.columns([4, 1])
+            col_a.write(f"{row['categoria']} | {row['produto']}")
+            if col_b.button("🗑️", key=f"del_{row['id']}"):
+                supabase.table("estoque").delete().eq("id", row['id']).execute()
+                st.rerun()
