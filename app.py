@@ -4,59 +4,37 @@ from supabase import create_client, Client
 import urllib.parse
 from datetime import datetime
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO (Mantenha sua URL e KEY aqui) ---
 URL = "https://vfbzvzajgbllbbnfrqbh.supabase.co"
-KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZmYnp2emFqZ2JsbGJibmZycWJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY2OTk2MjIsImV4cCI6MjA4MjI3NTYyMn0.b3Nk15L9Ez0i50kMpaOkBQEfOSY8GIhNYNmk9rycA9c" 
+KEY = "SUA_KEY_AQUI" 
 
 try:
     supabase: Client = create_client(URL, KEY)
 except Exception as e:
     st.error(f"Erro de Conexão: {e}")
 
-# 1. NOVO NOME CONFORME SOLICITADO
 st.set_page_config(page_title="Gestão de Estoque Gran Turin", layout="centered", page_icon="🍊")
 
-# --- FUNÇÕES ---
 def carregar_dados():
     try:
         res = supabase.table("estoque").select("*").execute()
         if res.data:
             df_res = pd.DataFrame(res.data)
-            # Normaliza TODAS as colunas para minúsculo para evitar KeyError
             df_res.columns = [c.lower() for c in df_res.columns]
             return df_res.sort_values(['categoria', 'produto'])
         return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+    except:
         return pd.DataFrame()
 
-def atualizar_item(id_item, atual, minimo):
-    try:
-        supabase.table("estoque").update({
-            "quantidade_atual": atual, 
-            "estoque_minimo": minimo
-        }).eq("id", id_item).execute()
-        st.toast("Estoque Atualizado!", icon="✅")
-        st.rerun()
-    except Exception as e:
-        st.error(f"Erro ao salvar: {e}")
-
-# --- TÍTULO ---
+# --- INTERFACE ---
 st.title("🍊 Gestão de Estoque Gran Turin")
-
 df = carregar_dados()
-
-# Garantir que as colunas mínimas existam no DF mesmo que vazio para evitar erros
-colunas_necessarias = ['id', 'categoria', 'produto', 'quantidade_atual', 'estoque_minimo']
-if df.empty:
-    df = pd.DataFrame(columns=colunas_necessarias)
 
 tab1, tab2, tab3 = st.tabs(["📦 ESTOQUE", "🛒 COMPRAS", "⚙️ GERENCIAR"])
 
-# --- ABA 1: CONFERÊNCIA ---
+# ... (Abas 1 e 2 permanecem iguais) ...
 with tab1:
-    if df.empty or len(df) == 0:
-        st.info("Nenhum produto encontrado. Cadastre na aba Gerenciar.")
+    if df.empty: st.info("Cadastre produtos na aba Gerenciar.")
     else:
         for cat in sorted(df['categoria'].unique()):
             with st.expander(f"📁 {cat.upper()}", expanded=True):
@@ -64,81 +42,76 @@ with tab1:
                 for _, row in itens.iterrows():
                     c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                     c1.markdown(f"**{row['produto']}**")
-                    
-                    # Uso de int() para garantir que não haja erro de tipo
                     n_at = c2.number_input("Tem", value=int(row['quantidade_atual']), key=f"at_{row['id']}")
                     n_min = c3.number_input("Mín", value=int(row['estoque_minimo']), key=f"min_{row['id']}")
-                    
                     if c4.button("💾", key=f"btn_{row['id']}"):
-                        atualizar_item(row['id'], n_at, n_min)
+                        supabase.table("estoque").update({"quantidade_atual": n_at, "estoque_minimo": n_min}).eq("id", row['id']).execute()
+                        st.rerun()
                     st.divider()
 
-# --- ABA 2: LISTA DE COMPRAS ---
 with tab2:
-    # Lógica de compras
-    df_compras = df[df['quantidade_atual'].astype(int) < df['estoque_minimo'].astype(int)]
-    
-    if df_compras.empty:
-        st.success("✅ Estoque abastecido!")
-    else:
-        st.subheader("Itens Faltantes")
-        texto_whats = f"*Lista Gran Turin ({datetime.now().strftime('%d/%m')})*\n\n"
-        for _, r in df_compras.iterrows():
-            necessario = int(r['estoque_minimo']) - int(r['quantidade_atual'])
-            msg = f"• {r['produto']} (Faltam {necessario} un.)"
-            st.warning(msg)
-            texto_whats += msg + "\n"
-        
-        st.divider()
-        link_wa = f"https://wa.me/?text={urllib.parse.quote(texto_whats)}"
-        st.link_button("🚀 ENVIAR LISTA WHATSAPP", link_wa, use_container_width=True)
+    if not df.empty:
+        df_compras = df[df['quantidade_atual'].astype(int) < df['estoque_minimo'].astype(int)]
+        if not df_compras.empty:
+            texto_whats = f"*Lista Gran Turin ({datetime.now().strftime('%d/%m')})*\n\n"
+            for _, r in df_compras.iterrows():
+                msg = f"• {r['produto']} (Faltam {int(r['estoque_minimo']) - int(r['quantidade_atual'])} un.)"
+                st.warning(msg)
+                texto_whats += msg + "\n"
+            st.link_button("🚀 ENVIAR WHATSAPP", f"https://wa.me/?text={urllib.parse.quote(texto_whats)}", use_container_width=True)
+        else:
+            st.success("Estoque em dia!")
 
-# --- ABA 3: GERENCIAR (Categorias Dinâmicas) ---
+# --- ABA 3: GERENCIAR (CORRIGIDA) ---
 with tab3:
     st.subheader("Cadastrar Novo Item")
     
-    # Busca categorias existentes para o Selectbox
-    categorias_existentes = []
-    if not df.empty and 'categoria' in df.columns:
-        categorias_existentes = sorted(df['categoria'].unique().tolist())
+    # 1. Pegamos as categorias fora do form para o selectbox ser responsivo
+    categorias_existentes = sorted(df['categoria'].unique().tolist()) if not df.empty else []
+    opcoes_cat = ["-- Selecione --", "+ Nova Categoria"] + categorias_existentes
     
-    opcoes = ["-- Selecione --", "+ Nova Categoria"] + categorias_existentes
+    # Selectbox FORA do form para atualizar a tela na hora
+    escolha = st.selectbox("Selecione a Categoria", options=opcoes_cat)
     
-    with st.form("form_cadastro", clear_on_submit=True):
-        escolha = st.selectbox("Categoria", options=opcoes)
+    categoria_final = ""
+    
+    # Se escolher nova, o campo aparece instantaneamente
+    if escolha == "+ Nova Categoria":
+        categoria_final = st.text_input("Nome da Nova Categoria:").strip().upper()
+    else:
+        categoria_final = escolha
+
+    # 2. Form apenas para os dados do produto
+    with st.form("cadastro_produto", clear_on_submit=True):
+        col_p, col_m = st.columns([3, 1])
+        nome_prod = col_p.text_input("Nome do Produto")
+        min_est = col_m.number_input("Mínimo", value=5, min_value=0)
         
-        # Campo extra se for categoria nova
-        nova_cat = ""
-        if escolha == "+ Nova Categoria":
-            nova_cat = st.text_input("Nome da Nova Categoria").upper()
-            
-        prod = st.text_input("Nome do Produto")
-        min_est = st.number_input("Estoque Mínimo", value=5, min_value=0)
+        btn_salvar = st.form_submit_button("CADASTRAR PRODUTO", use_container_width=True)
         
-        btn_cadastrar = st.form_submit_button("CADASTRAR PRODUTO", use_container_width=True)
-        
-        if btn_cadastrar:
-            cat_final = nova_cat if escolha == "+ Nova Categoria" else escolha
-            
-            if cat_final and cat_final != "-- Selecione --" and prod:
-                supabase.table("estoque").insert({
-                    "categoria": cat_final.strip().upper(),
-                    "produto": prod.strip(),
-                    "quantidade_atual": 0,
-                    "estoque_minimo": min_est
-                }).execute()
-                st.success("Produto cadastrado!")
-                st.rerun()
+        if btn_salvar:
+            if categoria_final and categoria_final != "-- Selecione --" and nome_prod:
+                try:
+                    supabase.table("estoque").insert({
+                        "categoria": categoria_final,
+                        "produto": nome_prod.strip(),
+                        "quantidade_atual": 0,
+                        "estoque_minimo": min_est
+                    }).execute()
+                    st.success(f"Sucesso: {nome_prod} adicionado!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
             else:
-                st.error("Preencha todos os campos corretamente.")
+                st.warning("Preencha todos os campos antes de salvar.")
 
     st.divider()
-    # Lista de exclusão
+    # Lista de exclusão simplificada
     if not df.empty:
-        with st.expander("🗑️ Excluir Produtos"):
+        with st.expander("🗑️ Remover Produtos"):
             for _, row in df.iterrows():
-                col_a, col_b = st.columns([4, 1])
-                col_a.write(f"{row['categoria']} | {row['produto']}")
-                if col_b.button("Excluir", key=f"del_{row['id']}"):
+                ca, cb = st.columns([4, 1])
+                ca.write(f"**{row['categoria']}** | {row['produto']}")
+                if cb.button("Excluir", key=f"del_{row['id']}"):
                     supabase.table("estoque").delete().eq("id", row['id']).execute()
                     st.rerun()
