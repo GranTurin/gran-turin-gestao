@@ -52,7 +52,7 @@ with tab1:
         st.info("Nenhum produto cadastrado.")
     else:
         for cat in sorted(df['categoria'].unique()):
-            with st.expander(f"📁 {cat.upper()}", expanded=True):
+            with st.expander(f"📁 {cat.upper()}", expanded=False):
                 itens = df[df['categoria'] == cat]
                 for _, row in itens.iterrows():
                     c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
