@@ -127,6 +127,31 @@ with tab3:
             for _, row in df.iterrows():
                 ca, cb = st.columns([4, 1])
                 ca.write(f"**{row['categoria']}** | {row['produto']}")
+                
+                #if cb.button("🗑️", key=f"del_{row['id']}"):
+                 #   supabase.table("estoque").delete().eq("id", row['id']).execute()
+                 #   st.rerun()
+
+
                 if cb.button("🗑️", key=f"del_{row['id']}"):
-                    supabase.table("estoque").delete().eq("id", row['id']).execute()
-                    st.rerun()
+                    try:
+                        # 1. Garantir que o ID seja enviado no formato correto (inteiro ou string)
+                        # Se o seu ID for numérico no banco, o int() resolve. 
+                        # Se for UUID, remova o int() e deixe apenas row['id']
+                        id_alvo = int(row['id']) 
+        
+                        # 2. Executar a deleção e pedir os dados de volta (returning)
+                        res = supabase.table("estoque").delete().eq("id", id_alvo).execute()
+        
+                        # 3. Validar se algo foi deletado
+                        if res.data:
+                            st.toast(f"Item removido com sucesso!", icon="✅")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            # Se cair aqui, o banco recebeu mas não achou o ID ou falta Primary Key
+                            st.error(f"O banco não encontrou o ID {id_alvo}. Verifique se a coluna 'id' é a Chave Primária.")
+            
+                    except Exception as e:
+                        st.error(f"Erro ao excluir: {e}")
+
